@@ -96,7 +96,7 @@ web:
   auth_token: ""
 devices:
   - id: example
-    adapter: example-speaker   # ← 注册名，不是 plugin.yaml 的 id；两条路线取值不同，见下
+    adapter: example-speaker   # ← 注册名；两条路线都写 device manifest id（见下）
     host: <your-device-host>   # 你的设备地址/局域网名（inbound 下用于显示/诊断）
     room: Example room
     volume: 60
@@ -114,10 +114,14 @@ mkdir -p data
 
 **关键：`devices[].adapter` 是「注册名」，不是 `plugin.yaml` 的 id。** 它等于：
 
-- `RUI_ADAPTER_PLUGINS` 条目的 `name=` 前缀；或
-- 通过 `RUI_PLUGINS_DIR` 扫描时，自动注册所用的 **device manifest `id`**。
+- 通过 `RUI_PLUGINS_DIR` 扫描时，自动注册所用的 **device manifest `id`**；或
+- `RUI_ADAPTER_PLUGINS` 条目的 `name=` 前缀，且本模板要求与 **device manifest `id` 一致**。
+  用别的名字（例如 plugin.yaml 的 `example-plugin`）adapter 仍会注册、plane 仍 running，
+  但 PlugCatalog 解析不到该 plug：device detail 报
+  `status_reason.code="plug_unresolved"`、`plugin_id`/`model_id` 为空、capabilities 的
+  `declared=false`（硬件事实回退 global）。
 
-两条路线各选一条（`adapter:` 必须与注册名一致）：
+两条路线都用 **`adapter: example-speaker`**：
 
 **路线 A：目录注册（`adapter: example-speaker`）** —— `RUI_PLUGINS_DIR` 指向**本仓的父目录**：
 
@@ -129,24 +133,29 @@ RUI_PLUGINS_DIR="$PWD" RUI_CONFIG=rui-plugin-template/config.yaml rui serve
 RUI 把 `<root>/rui-plugin-template/` 当 image 式插件：自动导入 `runtime.entrypoint`，
 注册名 = `devices/example.yaml` 的 `id`（`example-speaker`）。
 
-**路线 B：显式注册（`adapter: example-plugin`）** —— adapter 与 `plugin.yaml` 同目录：
+**路线 B：显式注册（`adapter: example-speaker`）** —— adapter 与 `plugin.yaml` 同目录：
 
 ```bash
 PYTHONPATH="$PWD" \
-RUI_ADAPTER_PLUGINS="example-plugin=adapter:build" \
+RUI_ADAPTER_PLUGINS="example-speaker=adapter:build" \
 RUI_CONFIG=./config.yaml rui serve
 ```
 
-`name=` 前缀就是 config 里的 `adapter:`；co-located 的 `plugin.yaml` 会被 loader 自动找到。
+`name=` 前缀就是 config 里的 `adapter:`；`example-speaker` 同时是 device manifest 的 `id`，
+所以 loader 会找到 co-located 的 `plugin.yaml`，PlugCatalog 也能解析
+（`plugin_id=example-plugin`、`model_id=example-speaker`）。写成 `example-plugin=…` 时
+adapter 仍会注册，但 catalog 报 `plug_unresolved`、能力声明退化为未声明。
 
 起来后验收：
 
 ```bash
 curl -s http://127.0.0.1:8088/health | python3 -m json.tool
-# 期望：device_errors=0、audio_plane=true；路线 B 的 adapter_plugins.registered 含 example-plugin
+# 期望：device_errors=0、audio_plane=true；路线 B 的 adapter_plugins.registered 含 example-speaker
 #      （路线 A 是 image 式目录注册，registered 为空是正常的，看日志 image plug ... registered adapter）
 curl -s http://127.0.0.1:8088/api/v2/devices/example | python3 -m json.tool
-# 期望：status=ready、ready=true、plane.running=true
+# 期望：status=ready、ready=true、status_reason.code="ready"、plane.running=true
+# 路线 B 还必须：plugin_id="example-plugin"、model_id="example-speaker"、
+# capabilities[playback].declared=true（证明 catalog 解析到了 device manifest）
 ```
 
 > 更完整的可启动样例（含 `/health`、设备接口与 tone 播放）见 core 仓
@@ -257,7 +266,7 @@ web:
   auth_token: ""
 devices:
   - id: example
-    adapter: example-speaker   # ← registration name, NOT plugin.yaml's id; differs per route (below)
+    adapter: example-speaker   # ← registration name; both routes use the device manifest id (below)
     host: <your-device-host>
     room: Example room
     volume: 60
@@ -276,11 +285,16 @@ mkdir -p data
 **Key point: `devices[].adapter` is a registration name, not `plugin.yaml`'s id.**
 It is either:
 
-- the `name=` prefix of a `RUI_ADAPTER_PLUGINS` entry, or
-- when registering through `RUI_PLUGINS_DIR`, the **device manifest `id`** the root
-  scan registers automatically.
+- the **device manifest `id`** the `RUI_PLUGINS_DIR` root scan registers
+  automatically, or
+- the `name=` prefix of a `RUI_ADAPTER_PLUGINS` entry, which this template
+  requires to **equal the device manifest `id`**. Any other name (for example
+  plugin.yaml's `example-plugin`) still registers the adapter and keeps the plane
+  running, but the PlugCatalog cannot resolve the plug: device detail reports
+  `status_reason.code="plug_unresolved"`, empty `plugin_id`/`model_id`, and
+  capabilities with `declared=false` (hardware facts fall back to global config).
 
-Pick one route (the config's `adapter:` must match it):
+Both routes use **`adapter: example-speaker`**:
 
 **Route A — directory registration (`adapter: example-speaker`)** — point
 `RUI_PLUGINS_DIR` at this repo's **parent directory**:
@@ -293,27 +307,32 @@ RUI_PLUGINS_DIR="$PWD" RUI_CONFIG=rui-plugin-template/config.yaml rui serve
 RUI treats `<root>/rui-plugin-template/` as an image-style plug: it imports
 `runtime.entrypoint` and registers it as the device manifest `id` (`example-speaker`).
 
-**Route B — explicit registration (`adapter: example-plugin`)** — adapter and
+**Route B — explicit registration (`adapter: example-speaker`)** — adapter and
 `plugin.yaml` co-located:
 
 ```bash
 PYTHONPATH="$PWD" \
-RUI_ADAPTER_PLUGINS="example-plugin=adapter:build" \
+RUI_ADAPTER_PLUGINS="example-speaker=adapter:build" \
 RUI_CONFIG=./config.yaml rui serve
 ```
 
-The `name=` prefix is the config's `adapter:`; the loader finds the co-located
-`plugin.yaml` next to the module.
+The `name=` prefix is the config's `adapter:`; `example-speaker` is also the device
+manifest `id`, so the loader finds the co-located `plugin.yaml` and the PlugCatalog
+resolves it (`plugin_id=example-plugin`, `model_id=example-speaker`). Using
+`example-plugin=…` still registers the adapter, but the catalog reports
+`plug_unresolved` and the declared capabilities are lost.
 
 Verify:
 
 ```bash
 curl -s http://127.0.0.1:8088/health | python3 -m json.tool
-# expect: device_errors=0, audio_plane=true; route B lists example-plugin in adapter_plugins.registered
+# expect: device_errors=0, audio_plane=true; route B lists example-speaker in adapter_plugins.registered
 #         (route A registers as an image-style directory plug, so that list stays empty and the proof
 #          is the log line "image plug ... registered adapter")
 curl -s http://127.0.0.1:8088/api/v2/devices/example | python3 -m json.tool
-# expect: status=ready, ready=true, plane.running=true
+# expect: status=ready, ready=true, status_reason.code="ready", plane.running=true
+# route B must also show plugin_id="example-plugin", model_id="example-speaker",
+# and capabilities[playback].declared=true (proof the catalog resolved the device manifest)
 ```
 
 > A fuller verified walkthrough (health, device API, tone playback) is in the core
