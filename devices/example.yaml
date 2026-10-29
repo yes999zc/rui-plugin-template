@@ -1,0 +1,62 @@
+# One device model supported by this plugin.
+#
+# Copy this file for every model you add (e.g. devices/my-speaker.yaml) and list
+# each path under `devices:` in plugin.yaml. The id here is the model manifest,
+# not a deployment instance: `devices[].adapter` in the RUI config points at the
+# plugin id (`example-plugin`).
+#
+# Reference: https://github.com/yes999zc/rui/blob/main/docs/socket-plug-v1.md
+schema: rui-device/v1
+id: example-speaker
+model: "EXAMPLE-01"
+name: "Example Speaker"
+vendor: "example vendor"
+class: A
+
+# `inbound`: the device dials RUI on `runtime.listen_port` (typical for a
+# firmware client). Use `outbound` if RUI has to dial the device instead.
+transport: inbound
+protocol:
+  kind: ws
+  version: "1"
+
+# Declare only what the device really supports; RUI degrades gracefully for
+# everything else. `playback` is the minimum for a speaker. Add `volume`/`led`
+# only when the adapter implements the matching services.
+capabilities: [playback]
+
+# How the adapter is launched. `in-process` needs `trust: trusted` above.
+# `entrypoint` is "python_module:function" (never a filesystem path).
+runtime:
+  mode: in-process
+  entrypoint: "adapter:build"
+  listen_port: 4412
+  token_env: RUI_DEVICE_TOKEN
+
+# Hardware facts this model adds on top of the neutral core defaults. Optional
+# and intentionally commented out: uncomment + edit the values for your device.
+# audio_defaults:
+#   capture:
+#     rate: 16000
+#     channels: 1
+#   playback:
+#     rate: 16000
+#   voice:
+#     followup_delay_ms: 300
+#     post_playback_mute_ms: 500
+
+# Wizard/console fields. Keep this list short; every entry is a field a user
+# must understand. Never ship a default for `type: secret`.
+params:
+  - key: host
+    label: "Speaker host or LAN name"
+    type: string
+    required: true
+    placeholder: "<your-device-host>"
+  - key: room
+    label: "Room"
+    type: string
+    default: "Example room"
+
+compatibility:
+  rui_min: "0.8.1"

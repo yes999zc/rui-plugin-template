@@ -1,0 +1,28 @@
+# RUI plugin manifest (Socket & Plug v0).
+#
+# This file is the only entry point RUI reads: it names the plugin, pins the
+# core versions the plugin was tested against, and lists the device manifests
+# under devices/. Everything else is data or adapter code behind that list.
+#
+# Reference: https://github.com/yes999zc/rui/blob/main/docs/socket-plug-v1.md
+schema: rui-plugin/v0
+id: example-plugin
+name: "RUI plugin template (example)"
+version: 0.1.0
+
+# Dual-window example: written against the 0.8.x device contract.
+# Keep the lower bound at the first core release you actually tested; raise the
+# ceiling only after testing the next minor (0.9.0 is not contracted yet).
+rui_compat: ">=0.8.1 <0.9.0"
+
+license: MIT
+maintainer: "rui-plugin-template contributors"
+homepage: "https://github.com/yes999zc/rui-plugin-template"
+
+# `trust: trusted` permits `runtime.mode: in-process` (adapter code runs inside
+# the RUI process, i.e. with full RUI privileges). This is a self-assertion:
+# only ship it for code you control. Third-party plugins must use `sidecar`.
+trust: trusted
+
+devices:
+  - devices/example.yaml
