@@ -1,9 +1,11 @@
 # One device model supported by this plugin.
 #
 # Copy this file for every model you add (e.g. devices/my-speaker.yaml) and list
-# each path under `devices:` in plugin.yaml. The id here is the model manifest,
-# not a deployment instance: `devices[].adapter` in the RUI config points at the
-# plugin id (`example-plugin`).
+# each path under `devices:` in plugin.yaml. `id` is the model manifest, not a
+# deployment instance. `devices[].adapter` in the RUI config is a **registration
+# name**: it equals this `id` when the plug is registered through
+# `RUI_PLUGINS_DIR`, or the `name=` prefix of a `RUI_ADAPTER_PLUGINS` entry —
+# never `plugin.yaml`'s id unless you chose that name explicitly.
 #
 # Reference: https://github.com/yes999zc/rui/blob/main/docs/socket-plug-v1.md
 schema: rui-device/v1

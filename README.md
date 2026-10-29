@@ -66,7 +66,10 @@ python -m pytest tests/ -q
 1. `plugin.yaml`：改 `id`、`name`、`version`、`maintainer`、`homepage`。`rui_compat`
    保持 dual-window：下界 = 你真正测过的第一个核心版本，上界 = 已测过的下一个 minor
    （本模板写 `>=0.8.1 <0.9.0`）。`trust: trusted` 表示 adapter 在 RUI 进程内运行
-   （完整权限），只给自己的代码用；第三方发布请改 `sidecar` 并配 `runtime.image`。
+   （完整权限），只给自己的代码用。**0.8.x 尚未实现 sidecar runner**：`runtime.mode: sidecar`
+   的清单能通过校验，但设备无法被驱动；第三方分发目前只有两条路——由运维审计后以
+   `trust: trusted` in-process 运行，或等 sidecar runner。见 core 仓
+   [`docs/bridge-developer/compatibility.md`](https://github.com/yes999zc/rui/blob/main/docs/bridge-developer/compatibility.md)。
 2. `devices/example.yaml`：改 `id`/`model`/`vendor`/`transport`/`protocol`/
    `capabilities`/`params`；`runtime.entrypoint` 指向你的 `模块:函数`；
    `runtime.listen_port` 是设备回连端口（按你的设备改，不要和同机其它插件撞）；
@@ -79,24 +82,76 @@ python -m pytest tests/ -q
 
 ### 4. 起一个最小 RUI 服务
 
-新建 `config.yaml`（与仓库同目录的示例，**不要提交真实地址/凭据**）：
+先写一个**照抄能启动**的最小 `config.yaml`（与仓库同目录；**不要提交真实地址/凭据**）。
+`web.auth_token: ""` 只在 loopback 绑定下允许；`system.data_dir` 填任意可写目录：
 
 ```yaml
+version: 3
+system:
+  data_dir: "./data"
+  log_level: info
+web:
+  host: 127.0.0.1        # loopback only: empty auth_token is refused on a public bind
+  port: 8088
+  auth_token: ""
 devices:
   - id: example
-    adapter: example-plugin      # 必须等于 plugin.yaml 的 id
-    host: <your-device-host>     # 你的设备地址/局域网名（inbound 下用于显示/诊断）
+    adapter: example-speaker   # ← 注册名，不是 plugin.yaml 的 id；两条路线取值不同，见下
+    host: <your-device-host>   # 你的设备地址/局域网名（inbound 下用于显示/诊断）
     room: Example room
+    volume: 60
+audio:
+  voice:
+    kws_enabled: false         # 模板只验 wire；唤醒/VAD/ASR 需要真实模型
+    vad_model_path: ""
+  capture: {rate: 16000, channels: 1}
+  playback: {rate: 16000, channels: 1}
 ```
-
-把插件目录挂载给 RUI，然后起服务：
 
 ```bash
-export RUI_CONFIG=./config.yaml
-# runtime.token_env 指向的环境变量：由你写入设备 token（不要写进命令历史/仓库）
-read -rs RUI_DEVICE_TOKEN && export RUI_DEVICE_TOKEN
-rui serve
+mkdir -p data
 ```
+
+**关键：`devices[].adapter` 是「注册名」，不是 `plugin.yaml` 的 id。** 它等于：
+
+- `RUI_ADAPTER_PLUGINS` 条目的 `name=` 前缀；或
+- 通过 `RUI_PLUGINS_DIR` 扫描时，自动注册所用的 **device manifest `id`**。
+
+两条路线各选一条（`adapter:` 必须与注册名一致）：
+
+**路线 A：目录注册（`adapter: example-speaker`）** —— `RUI_PLUGINS_DIR` 指向**本仓的父目录**：
+
+```bash
+cd ..
+RUI_PLUGINS_DIR="$PWD" RUI_CONFIG=rui-plugin-template/config.yaml rui serve
+```
+
+RUI 把 `<root>/rui-plugin-template/` 当 image 式插件：自动导入 `runtime.entrypoint`，
+注册名 = `devices/example.yaml` 的 `id`（`example-speaker`）。
+
+**路线 B：显式注册（`adapter: example-plugin`）** —— adapter 与 `plugin.yaml` 同目录：
+
+```bash
+PYTHONPATH="$PWD" \
+RUI_ADAPTER_PLUGINS="example-plugin=adapter:build" \
+RUI_CONFIG=./config.yaml rui serve
+```
+
+`name=` 前缀就是 config 里的 `adapter:`；co-located 的 `plugin.yaml` 会被 loader 自动找到。
+
+起来后验收：
+
+```bash
+curl -s http://127.0.0.1:8088/health | python3 -m json.tool
+# 期望：device_errors=0、audio_plane=true；路线 B 的 adapter_plugins.registered 含 example-plugin
+#      （路线 A 是 image 式目录注册，registered 为空是正常的，看日志 image plug ... registered adapter）
+curl -s http://127.0.0.1:8088/api/v2/devices/example | python3 -m json.tool
+# 期望：status=ready、ready=true、plane.running=true
+```
+
+> 更完整的可启动样例（含 `/health`、设备接口与 tone 播放）见 core 仓
+> [`docs/bridge-developer/quickstart.md`](https://github.com/yes999zc/rui/blob/main/docs/bridge-developer/quickstart.md)
+> §3/§4；三条安装路径与注册名规则见同目录 `install-paths.md`。
 
 打开 RUI 控制台，设备应出现并处于 connected；`/api/v1/plugs` 能看到
 `example-plugin`。
@@ -168,8 +223,11 @@ python -m pytest tests/ -q
    `rui_compat` as a dual window: lower bound = the first core release you tested,
    upper bound = the next minor you have tested (`>=0.8.1 <0.9.0` here).
    `trust: trusted` means the adapter runs **in-process** with full RUI privileges;
-   only use it for code you control. Third-party distributions should use `sidecar`
-   with `runtime.image`.
+   only use it for code you control. **0.8.x has no sidecar runner**: a manifest with
+   `runtime.mode: sidecar` validates, but the device cannot be driven. Third-party
+   distribution currently means either an operator-reviewed `trust: trusted` in-process
+   install, or waiting for the sidecar runner. See core
+   [`docs/bridge-developer/compatibility.md`](https://github.com/yes999zc/rui/blob/main/docs/bridge-developer/compatibility.md).
 2. `devices/example.yaml`: change `id`/`model`/`vendor`/`transport`/`protocol`/
    `capabilities`/`params`; point `runtime.entrypoint` at your `module:function`;
    set `runtime.listen_port` to your device's dial-back port; `token_env` is only
@@ -184,24 +242,84 @@ python -m pytest tests/ -q
 
 ### 4. Start a minimal RUI service
 
-Create `config.yaml` (keep real hosts/credentials out of the repo):
+Write a minimal `config.yaml` that **works as copy-pasted** (same directory as this
+repo; never commit real hosts/credentials). `web.auth_token: ""` is accepted on a
+loopback bind only; `system.data_dir` is any writable directory:
 
 ```yaml
+version: 3
+system:
+  data_dir: "./data"
+  log_level: info
+web:
+  host: 127.0.0.1        # loopback only: empty auth_token is refused on a public bind
+  port: 8088
+  auth_token: ""
 devices:
   - id: example
-    adapter: example-plugin      # must equal plugin.yaml's id
+    adapter: example-speaker   # ← registration name, NOT plugin.yaml's id; differs per route (below)
     host: <your-device-host>
     room: Example room
+    volume: 60
+audio:
+  voice:
+    kws_enabled: false         # the template exercises the wire only; wake/VAD/ASR need models
+    vad_model_path: ""
+  capture: {rate: 16000, channels: 1}
+  playback: {rate: 16000, channels: 1}
 ```
-
-Point RUI at it and start the control plane:
 
 ```bash
-export RUI_CONFIG=./config.yaml
-# The env var named by runtime.token_env; set it without writing the secret to disk.
-read -rs RUI_DEVICE_TOKEN && export RUI_DEVICE_TOKEN
-rui serve
+mkdir -p data
 ```
+
+**Key point: `devices[].adapter` is a registration name, not `plugin.yaml`'s id.**
+It is either:
+
+- the `name=` prefix of a `RUI_ADAPTER_PLUGINS` entry, or
+- when registering through `RUI_PLUGINS_DIR`, the **device manifest `id`** the root
+  scan registers automatically.
+
+Pick one route (the config's `adapter:` must match it):
+
+**Route A — directory registration (`adapter: example-speaker`)** — point
+`RUI_PLUGINS_DIR` at this repo's **parent directory**:
+
+```bash
+cd ..
+RUI_PLUGINS_DIR="$PWD" RUI_CONFIG=rui-plugin-template/config.yaml rui serve
+```
+
+RUI treats `<root>/rui-plugin-template/` as an image-style plug: it imports
+`runtime.entrypoint` and registers it as the device manifest `id` (`example-speaker`).
+
+**Route B — explicit registration (`adapter: example-plugin`)** — adapter and
+`plugin.yaml` co-located:
+
+```bash
+PYTHONPATH="$PWD" \
+RUI_ADAPTER_PLUGINS="example-plugin=adapter:build" \
+RUI_CONFIG=./config.yaml rui serve
+```
+
+The `name=` prefix is the config's `adapter:`; the loader finds the co-located
+`plugin.yaml` next to the module.
+
+Verify:
+
+```bash
+curl -s http://127.0.0.1:8088/health | python3 -m json.tool
+# expect: device_errors=0, audio_plane=true; route B lists example-plugin in adapter_plugins.registered
+#         (route A registers as an image-style directory plug, so that list stays empty and the proof
+#          is the log line "image plug ... registered adapter")
+curl -s http://127.0.0.1:8088/api/v2/devices/example | python3 -m json.tool
+# expect: status=ready, ready=true, plane.running=true
+```
+
+> A fuller verified walkthrough (health, device API, tone playback) is in the core
+> repo's
+> [`docs/bridge-developer/quickstart.md`](https://github.com/yes999zc/rui/blob/main/docs/bridge-developer/quickstart.md)
+> §3/§4; install paths and registration-name rules are in `install-paths.md` there.
 
 The device should appear in the RUI console as connected, and `/api/v1/plugs`
 should list `example-plugin`.

@@ -221,6 +221,23 @@ class ExampleAdapter:
         """
         return []
 
+    # ---------------------------------------------------------------- diagnostics
+    def health(self) -> dict:
+        """Optional link diagnostics for the console and some actions.
+
+        NOT part of ``DeviceAdapter``: the console device page and action
+        endpoints read ``health().connected`` to decide whether the room is
+        live. A real adapter must derive it from its own transport (socket open,
+        last frame/pong within N seconds).
+
+        This template has no transport, so it reports the in-memory placeholder
+        as connected; otherwise the device would sit at status "disconnected"
+        even though its plane is running.
+        TODO: replace with your link state, e.g.
+        ``{"connected": self._socket is not None and self._age_s() < 5}``.
+        """
+        return {"connected": True}
+
 
 def build(device: object | None = None, config: object | None = None) -> ExampleAdapter:
     """Construct the adapter for one configured device.
